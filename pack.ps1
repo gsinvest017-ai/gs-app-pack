@@ -53,17 +53,37 @@ pack.config.ps1 not found in: $ProjectRoot
 # ── Auto version-bump from -Tag (runs before build so installer picks it up) ─
 if ($Tag -and $Only -ne "release") {
     $NewVersion = $Tag -replace '^v', ''
+    $anyBump = $false
+
+    # Patch $AppVersion in pack.config.ps1
     $ConfigPath = (Resolve-Path $Config).Path
     $Raw = [System.IO.File]::ReadAllText($ConfigPath)
     $Patched = $Raw -replace '(\$AppVersion\s*=\s*")[^"]*(")', "`${1}$NewVersion`${2}"
     if ($Patched -ne $Raw) {
         [System.IO.File]::WriteAllText($ConfigPath, $Patched, [System.Text.UTF8Encoding]::new($false))
-        Write-Host "Bumped AppVersion -> $NewVersion in $Config" -ForegroundColor Yellow
         git add $Config 2>&1 | Out-Null
+        Write-Host "Bumped `$AppVersion -> $NewVersion in $Config" -ForegroundColor Yellow
+        $anyBump = $true
+    }
+
+    # Patch APP_VERSION in ghsummary/config.py (reported via /api/update/check)
+    $PyConfigPath = Join-Path $ProjectRoot "ghsummary\config.py"
+    if (Test-Path $PyConfigPath) {
+        $PyRaw = [System.IO.File]::ReadAllText($PyConfigPath)
+        $PyPatched = $PyRaw -replace '(APP_VERSION\s*=\s*")[^"]*(")', "`${1}$NewVersion`${2}"
+        if ($PyPatched -ne $PyRaw) {
+            [System.IO.File]::WriteAllText($PyConfigPath, $PyPatched, [System.Text.UTF8Encoding]::new($false))
+            git add "ghsummary\config.py" 2>&1 | Out-Null
+            Write-Host "Bumped APP_VERSION -> $NewVersion in ghsummary/config.py" -ForegroundColor Yellow
+            $anyBump = $true
+        }
+    }
+
+    if ($anyBump) {
         git commit -m "chore: 版號升至 $NewVersion" 2>&1 | Out-Null
         Write-Host "Version bump committed" -ForegroundColor DarkGray
     } else {
-        Write-Host "AppVersion already $NewVersion -- skipping bump" -ForegroundColor DarkGray
+        Write-Host "Version already $NewVersion -- skipping bump" -ForegroundColor DarkGray
     }
 }
 
