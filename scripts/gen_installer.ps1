@@ -64,11 +64,16 @@ var
 begin
   if CurStep <> ssPostInstall then Exit;
   if IsGhAuthenticated() then Exit;
-  if MsgBox('Last step: log in to GitHub.' + #13#10 + #13#10 +
-            'Open a terminal to complete login now?',
-            mbConfirmation, MB_YESNO) = IDYES then
-    ShellExec('open', 'powershell.exe', '-NoExit -Command "gh auth login"',
-              '', SW_SHOW, ewNoWait, ResultCode);
+  if MsgBox(
+    'GitHub Authentication -- 3 Steps' + #13#10 + #13#10 +
+    '1. Click OK and your browser will open the GitHub login page' + #13#10 +
+    '2. Sign in to GitHub (if not already) and click Authorize' + #13#10 +
+    '3. Return here once authorization is complete' + #13#10 + #13#10 +
+    'Open browser to authorize now?',
+    mbConfirmation, MB_YESNO) = IDYES then
+    ShellExec('open', 'powershell.exe',
+      '-NoExit -Command "gh auth login --web"',
+      '', SW_SHOW, ewNoWait, ResultCode);
 end;
 '@
 }
