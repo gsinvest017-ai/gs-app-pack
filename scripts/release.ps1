@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 . (Resolve-Path $Config)
 
 $setupExe   = "dist\$AppExe-setup.exe"
+$setupMsi   = "dist\$AppExe-setup.msi"
 $assetLabel = "$AppExe-setup-$AppVersion.exe"
 
 if (-not (Test-Path $setupExe)) {
@@ -51,9 +52,14 @@ The installer will:
     }
 }
 
-# Create release.
-$assetArg = "$setupExe#$assetLabel"
-gh release create $Tag $assetArg `
+# Build asset list — always include the .exe; add .msi if it was built.
+$assets = @("$setupExe#$assetLabel")
+if (Test-Path $setupMsi) {
+    $assets += "$setupMsi#$AppExe-setup-$AppVersion.msi"
+    Write-Host "Including MSI: $setupMsi"
+}
+
+gh release create $Tag @assets `
     --title "$AppName $Tag" `
     --notes $Notes
 

@@ -18,6 +18,11 @@
 # One-liner release (bump version -> build -> package -> publish):
 #   C:\path\to\gs-app-pack\pack.ps1 -Tag v1.2.3 -Clean
 #   Automatically patches $AppVersion in pack.config.ps1 and commits before building.
+#
+# Generate MSI (WiX v4) in addition to the Inno Setup .exe:
+#   C:\path\to\gs-app-pack\pack.ps1 -Tag v1.2.3 -Clean -Msi
+#   Prerequisite: dotnet tool install --global wix
+#   Standalone MSI only: C:\path\to\gs-app-pack\pack.ps1 -Only msi
 
 [CmdletBinding()]
 param(
@@ -27,7 +32,8 @@ param(
     [string]$Notes     = "",            # optional release notes
     [switch]$Clean,
     [switch]$SkipBuild,
-    [switch]$OneFile
+    [switch]$OneFile,
+    [switch]$Msi       # also generate MSI via WiX (requires: dotnet tool install --global wix)
 )
 
 $PackRoot    = $PSScriptRoot
@@ -61,6 +67,11 @@ if ($Tag -and $Only -ne "release") {
     }
 }
 
+# Load config so pack.ps1 can read project-level flags like $BuildMsi.
+# Done AFTER the auto-bump so $AppVersion already reflects the tag.
+$BuildMsi = $false  # default; overridden by config if set
+. (Resolve-Path $Config)
+
 # ── Step 1: Build (PyInstaller) ───────────────────────────────────────────
 if ($Only -eq "" -or $Only -eq "build") {
     if (-not $SkipBuild) {
@@ -76,8 +87,14 @@ if ($Only -eq "" -or $Only -eq "build") {
 
 # ── Step 2: Installer (Inno Setup) ───────────────────────────────────────
 if ($Only -eq "" -or $Only -eq "installer") {
-    Write-Host "=== [2/3] Generating installer ===" -ForegroundColor Cyan
+    Write-Host "=== [2/3] Generating installer (.exe) ===" -ForegroundColor Cyan
     & "$PackRoot\scripts\gen_installer.ps1" -Config $Config
+}
+
+# ── Step 2b: MSI (WiX v4) — opt-in via -Msi or -Only msi ────────────────
+if (($Only -eq "" -and ($Msi -or $BuildMsi)) -or $Only -eq "msi") {
+    Write-Host "=== [2b] Generating MSI (.msi) ===" -ForegroundColor Cyan
+    & "$PackRoot\scripts\gen_msi.ps1" -Config $Config
 }
 
 # ── Step 3: GitHub Release ───────────────────────────────────────────────
