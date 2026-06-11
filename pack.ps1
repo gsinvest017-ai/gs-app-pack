@@ -14,6 +14,10 @@
 #   C:\path\to\gs-app-pack\pack.ps1 -Only release -Tag v1.0.0
 #   C:\path\to\gs-app-pack\pack.ps1 -Clean               # clean build first
 #   C:\path\to\gs-app-pack\pack.ps1 -SkipBuild           # skip PyInstaller
+#
+# One-liner release (bump version -> build -> package -> publish):
+#   C:\path\to\gs-app-pack\pack.ps1 -Tag v1.2.3 -Clean
+#   Automatically patches $AppVersion in pack.config.ps1 and commits before building.
 
 [CmdletBinding()]
 param(
@@ -38,6 +42,23 @@ pack.config.ps1 not found in: $ProjectRoot
    Copy-Item "$PackRoot\pack.example.ps1" pack.config.ps1
 2. Edit pack.config.ps1 with your app settings.
 "@
+}
+
+# ── Auto version-bump from -Tag (runs before build so installer picks it up) ─
+if ($Tag -and $Only -ne "release") {
+    $NewVersion = $Tag -replace '^v', ''
+    $ConfigPath = (Resolve-Path $Config).Path
+    $Raw = [System.IO.File]::ReadAllText($ConfigPath)
+    $Patched = $Raw -replace '(\$AppVersion\s*=\s*")[^"]*(")', "`${1}$NewVersion`${2}"
+    if ($Patched -ne $Raw) {
+        [System.IO.File]::WriteAllText($ConfigPath, $Patched, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "Bumped AppVersion -> $NewVersion in $Config" -ForegroundColor Yellow
+        git add $Config 2>&1 | Out-Null
+        git commit -m "chore: 版號升至 $NewVersion" 2>&1 | Out-Null
+        Write-Host "Version bump committed" -ForegroundColor DarkGray
+    } else {
+        Write-Host "AppVersion already $NewVersion -- skipping bump" -ForegroundColor DarkGray
+    }
 }
 
 # ── Step 1: Build (PyInstaller) ───────────────────────────────────────────
