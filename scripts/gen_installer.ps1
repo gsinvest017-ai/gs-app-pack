@@ -19,20 +19,48 @@ $template = Get-Content "$PackRoot\templates\installer.iss.template" -Raw
 $ghBlock = ""
 if ($InstallerRequiresGh) {
     $ghBlock = @'
-function IsGhInstalled(): Boolean;
+var
+  CachedGhPath: String;
+
+{ Resolve gh.exe by absolute path first: right after winget installs gh,
+  THIS installer process still has the pre-install PATH, so bare "gh"
+  would not be found. PATH lookup is only the last resort. }
+function GhExe(): String;
 var
   ResultCode: Integer;
+  PfPath, UserPath: String;
 begin
-  Exec('cmd.exe', '/c where gh >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := (ResultCode = 0);
+  if CachedGhPath <> '' then begin
+    Result := CachedGhPath;
+    Exit;
+  end;
+  PfPath   := ExpandConstant('{autopf}\GitHub CLI\gh.exe');
+  UserPath := ExpandConstant('{localappdata}\Programs\GitHub CLI\gh.exe');
+  if FileExists(PfPath) then
+    CachedGhPath := PfPath
+  else if FileExists(UserPath) then
+    CachedGhPath := UserPath
+  else if Exec('cmd.exe', '/c where gh >nul 2>&1', '', SW_HIDE,
+               ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    CachedGhPath := 'gh';
+  Result := CachedGhPath;
+end;
+
+function IsGhInstalled(): Boolean;
+begin
+  Result := (GhExe() <> '');
 end;
 
 function IsGhAuthenticated(): Boolean;
 var
   ResultCode: Integer;
+  Gh: String;
 begin
-  Exec('cmd.exe', '/c gh auth status >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := (ResultCode = 0);
+  Result := False;
+  Gh := GhExe();
+  if Gh = '' then Exit;
+  if Exec(Gh, 'auth status', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := (ResultCode = 0);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -47,7 +75,8 @@ begin
   Exec('winget.exe',
     'install --id GitHub.cli --silent --accept-package-agreements --accept-source-agreements',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  if ResultCode = 0 then
+  CachedGhPath := '';  { re-resolve now that winget may have installed it }
+  if (ResultCode = 0) and IsGhInstalled() then
     WizardForm.PreparingLabel.Caption := 'GitHub CLI installed.'
   else begin
     WizardForm.PreparingLabel.Caption := 'Note: auto-install of gh failed.';
@@ -61,18 +90,21 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
+  Gh: String;
 begin
   if CurStep <> ssPostInstall then Exit;
   if IsGhAuthenticated() then Exit;
+  Gh := GhExe();
+  if Gh = '' then Exit;  { gh missing entirely; manual message already shown }
   if MsgBox(
-    'GitHub Authentication -- 3 Steps' + #13#10 + #13#10 +
-    '1. Click OK and your browser will open the GitHub login page' + #13#10 +
-    '2. Sign in to GitHub (if not already) and click Authorize' + #13#10 +
-    '3. Return here once authorization is complete' + #13#10 + #13#10 +
-    'Open browser to authorize now?',
+    'GitHub Authorization -- what will happen' + #13#10 + #13#10 +
+    '1. Click Yes: a PowerShell window opens and shows a one-time code (XXXX-XXXX).' + #13#10 +
+    '2. Copy that code, then press Enter in the window -- your browser opens GitHub.' + #13#10 +
+    '3. Sign in, paste the code, and click Authorize. Then close the window.' + #13#10 + #13#10 +
+    'Start GitHub authorization now?',
     mbConfirmation, MB_YESNO) = IDYES then
     ShellExec('open', 'powershell.exe',
-      '-NoExit -Command "gh auth login --web"',
+      '-NoExit -Command "& ''' + Gh + ''' auth login --web --hostname github.com --git-protocol https"',
       '', SW_SHOW, ewNoWait, ResultCode);
 end;
 '@
