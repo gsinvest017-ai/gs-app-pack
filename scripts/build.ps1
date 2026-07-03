@@ -36,10 +36,12 @@ Write-Host "Generating icon ($IconBg / $IconRing) ..."
 python "$PackScripts\make_icon.py" --out "static\gs-icon.ico" --bg $IconBg --ring $IconRing --size $IconSize
 if ($LASTEXITCODE -ne 0) { Write-Error "make_icon.py failed" }
 
-# Build --add-data flags
+# Build --add-data flags — ONLY what the project's $PyiAddData lists.
+# Never auto-include config.yaml: a dev machine's config may carry private
+# values (LAN IPs, tokens' owner names); projects that want it bundled must
+# opt in explicitly via $PyiAddData.
 $addDataArgs = @()
 foreach ($d in $PyiAddData) { $addDataArgs += "--add-data", $d }
-if (Test-Path "config.yaml") { $addDataArgs += "--add-data", "config.yaml;." }
 
 $mode = if ($OneFile) { "--onefile" } else { "--onedir" }
 
