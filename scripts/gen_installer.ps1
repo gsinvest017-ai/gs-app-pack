@@ -93,6 +93,9 @@ var
   Gh: String;
 begin
   if CurStep <> ssPostInstall then Exit;
+  { Silent runs (auto-update) must never pop dialogs; gh is normally
+    already authenticated on an upgrade anyway. }
+  if WizardSilent() then Exit;
   if IsGhAuthenticated() then Exit;
   Gh := GhExe();
   if Gh = '' then Exit;  { gh missing entirely; manual message already shown }
