@@ -59,9 +59,33 @@ if (Test-Path $setupMsi) {
     Write-Host "Including MSI: $setupMsi"
 }
 
+# Pushing the tag can trigger a CI workflow that builds its own artefacts and
+# creates the release before this upload — a large installer takes minutes to
+# transfer, so the race is not close. `gh release create` then fails with
+# "Release.tag_name already exists" and, unchecked, the script would go on to
+# announce success while the published assets came from somewhere else entirely.
+# That shipped once: a release marked Latest carrying a 2.4 MB installer with no
+# licence gate, in place of the 585 MB one that had just passed every check.
 gh release create $Tag @assets `
     --title "$AppName $Tag" `
     --notes $Notes
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "gh release create FAILED (exit $LASTEXITCODE)." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "If it says the tag already exists, something else published this" -ForegroundColor Red
+    Write-Host "release first -- usually a workflow triggered by the tag push." -ForegroundColor Red
+    Write-Host "Check what is actually attached before trusting it:" -ForegroundColor Red
+    Write-Host "    gh release view $Tag --json assets" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "To replace those assets with the ones just built:" -ForegroundColor Red
+    foreach ($a in $assets) {
+        $parts = $a -split "#"
+        Write-Host "    gh release upload $Tag '$($parts[0])#$($parts[1])' --clobber" -ForegroundColor Red
+    }
+    exit 1
+}
 
 Write-Host ""
 # $AppUrl is already absolute (pack.example.ps1 shows it as https://github.com/owner/repo),
