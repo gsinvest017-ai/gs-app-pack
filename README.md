@@ -27,8 +27,8 @@ Copy-Item C:\path\to\gs-app-pack\templates\app_launcher.py  app.py
 # 2. Edit pack.config.ps1  (app name, version, pyinstaller add-data, etc.)
 # 3. Edit app.py           (fill in _start_server() for your server type)
 
-# 4. Install prerequisites (once)
-pip install pyinstaller pywebview
+# 4. Install prerequisites (once) — into the PROJECT'S venv, not globally
+.venv\Scripts\python -m pip install pyinstaller pywebview
 winget install JRSoftware.InnoSetup
 
 # 5. Full build + installer
@@ -49,6 +49,37 @@ C:\path\to\gs-app-pack\pack.ps1 -Tag v0.1.0
 | `pack.ps1 -Only installer` | Inno Setup step only |
 | `pack.ps1 -Tag v0.1.0` | Build + installer + GitHub release |
 | `pack.ps1 -Only release -Tag v0.1.0` | Release existing installer |
+
+## Build environment
+
+**The build uses the project's own virtualenv**, resolved in this order:
+
+1. `$PythonExe` from `pack.config.ps1`
+2. `.venv\Scripts\python.exe`
+3. `venv\Scripts\python.exe`
+4. `python` on PATH — with a warning
+
+This is not cosmetic. PyInstaller bundles the packages of *the interpreter it runs
+under*, and it reports success either way. Building with `pyinstaller` from PATH
+when the project's dependencies live in `.venv` produces an executable missing
+them. A licensed app shipped this way once: the licence module was installed
+editable in the system Python, PyInstaller could not follow that install, the
+module was omitted, and the licence check — written to fail open so a packaging
+slip never locks out a paying customer — let the unprotected build run silently.
+
+Two config knobs guard against a repeat:
+
+| Setting | What it does |
+|---------|--------------|
+| `$RequireNonEditable = @("pkg")` | Build fails if `pkg` is missing, or installed `-e`, in the build interpreter. PyInstaller's static module graph cannot follow a `.pth` editable install whose directory is not named after the package, so it is dropped without a warning. List packages whose absence is *quiet* rather than a crash. |
+| `$PostBuildCheck = "cmd {dist}"` | Runs against the finished executable; non-zero exit fails the build. `{dist}` becomes the exe path. Bundling problems cannot be seen from outside — pure-Python modules are compiled into the exe's PYZ archive, so inspecting `dist\` proves nothing. Only running it does. |
+
+Example (`autogo`, which must ship with its licence gate intact):
+
+```powershell
+$RequireNonEditable = @("keyguard")
+$PostBuildCheck = "python C:\Users\User\KEYGUARD\scripts\verify_packaged_licence.py {dist}"
+```
 
 ## Server modes (in app.py)
 

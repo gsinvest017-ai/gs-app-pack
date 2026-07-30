@@ -54,5 +54,31 @@ $PyiAddData   = @(
 )
 $PyiExtraArgs = @()                   # any extra pyinstaller flags
 
+# ── Build environment ─────────────────────────────────────────────────────────
+# Which interpreter builds the app. Left blank, the project's .venv is used, then
+# venv, then whatever python is on PATH (with a warning). Set this only when the
+# virtualenv lives somewhere unusual.
+#
+# It matters because PyInstaller bundles the packages of the interpreter it runs
+# under: build with the wrong one and the executable is missing the project's
+# dependencies, while PyInstaller still reports success.
+$PythonExe    = ""
+
+# Packages that must be installed NON-editable in the build interpreter.
+# PyInstaller's module graph is static and cannot follow a `.pth`-based editable
+# install whose directory is not named after the package (a `src/` layout, say);
+# the package is then omitted silently. Anything the app crashes without is
+# self-evident, so list the ones whose absence is *quiet* — a licence check that
+# fails open, telemetry, a plugin loader.
+$RequireNonEditable = @()             # e.g. @("keyguard")
+
+# A command run against the executable straight after the build. Non-zero exit
+# fails the build. `{dist}` is replaced with the path to the built .exe.
+#
+# Worth having because bundling problems are invisible from the outside: pure
+# Python modules are compiled into the exe's PYZ archive, so inspecting the dist
+# directory proves nothing. Only running it does.
+$PostBuildCheck = ""                  # e.g. "python C:\...\verify_x.py {dist}"
+
 # ── Installer (Inno Setup) ────────────────────────────────────────────────
 $InstallerRequiresGh = $false         # auto-install GitHub CLI if missing

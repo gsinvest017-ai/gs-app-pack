@@ -15,6 +15,37 @@ $PackScripts = $PSScriptRoot
 $ProjectRoot = (Get-Location).Path
 $ErrorActionPreference = "Stop"
 
+# Abort with a message and a non-zero exit code.
+#
+# Not Write-Error: under `powershell -Command "& build.ps1"` a terminating error
+# record still leaves $LASTEXITCODE at 0, so a caller — a CI step, pack.ps1 run
+# from a wrapper — reads the failure as success. For a script whose job is to
+# refuse bad builds, exiting 0 on refusal defeats the point.
+function Fail {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host $Message -ForegroundColor Red
+    Write-Host ""
+    exit 1
+}
+
+# Run a native command and return its combined output as text, without letting
+# stderr become a PowerShell error record. pip writes warnings to stderr on a
+# perfectly successful call ("Ignoring invalid distribution ~"), which under
+# ErrorActionPreference=Stop would abort the script with a NativeCommandError
+# instead of reporting what the check actually found.
+function Invoke-Native {
+    param([string]$Exe, [string[]]$Arguments)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $Exe @Arguments 2>&1 | Out-String
+        return @{ Text = $output; Code = $LASTEXITCODE }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 . (Resolve-Path $Config)   # loads $AppExe, $PyiAddData, $PyiExtraArgs, etc.
 
 # Kill running instance (file-lock prevention)
@@ -25,15 +56,88 @@ if ($Clean) {
     Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
 }
 
-foreach ($cmd in @("pyinstaller", "python")) {
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Write-Error "'$cmd' not found on PATH."
+# ── Which Python builds the app ───────────────────────────────────────────────
+# The project's own virtualenv, in preference to whatever is on PATH.
+#
+# This is not a convenience. PyInstaller bundles the packages of the interpreter
+# it runs under, so building with a different interpreter than the project uses
+# produces an executable missing the project's dependencies — and PyInstaller
+# reports success either way. An earlier build of a licensed app silently shipped
+# without its licence module for exactly this reason: `pyinstaller` on PATH
+# belonged to the system Python, which had that module installed editable.
+#
+# Override with $PythonExe in pack.config.ps1 when the venv lives elsewhere.
+function Resolve-BuildPython {
+    param([string]$Configured)
+
+    if ($Configured) {
+        if (-not (Test-Path $Configured)) {
+            Fail "`$PythonExe points at '$Configured', which does not exist."
+        }
+        return (Resolve-Path $Configured).Path
     }
+    foreach ($candidate in @(".venv\Scripts\python.exe", "venv\Scripts\python.exe",
+                             ".venv/bin/python", "venv/bin/python")) {
+        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+    }
+    $onPath = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $onPath) {
+        Fail "No project virtualenv found and 'python' is not on PATH."
+    }
+    Write-Host "WARNING: no project virtualenv found; building with the Python on" -ForegroundColor Yellow
+    Write-Host "         PATH ($($onPath.Source)). The executable will contain that" -ForegroundColor Yellow
+    Write-Host "         interpreter's packages, which may not be the project's." -ForegroundColor Yellow
+    return $onPath.Source
+}
+
+$Python = Resolve-BuildPython -Configured $PythonExe
+Write-Host "Build interpreter: $Python"
+
+$probe = Invoke-Native $Python @("-c", "import PyInstaller")
+if ($probe.Code -ne 0) {
+    Fail ("PyInstaller is not installed in the build interpreter:`n  $Python`n`n" +
+          "Install it there:`n    & '$Python' -m pip install pyinstaller")
+}
+
+# ── Packages that must not be installed editable ──────────────────────────────
+# PyInstaller's module graph is static: it cannot follow a `.pth`-based editable
+# install whose directory is not named after the package (a `src/` layout, say).
+# The package is then omitted with no warning. For anything the app merely uses
+# that is an obvious crash; for a licence check written to fail open it is a
+# silently unprotected release, which is the case this check exists for.
+#
+# Declare in pack.config.ps1:  $RequireNonEditable = @("keyguard")
+foreach ($pkg in $RequireNonEditable) {
+    $show = Invoke-Native $Python @("-m", "pip", "show", $pkg)
+    if ($show.Code -ne 0 -or $show.Text -notmatch "(?m)^Name:") {
+        Fail ("Required package '$pkg' is not installed in the build " +
+              "interpreter:`n  $Python`n`nInstall it there:`n" +
+              "    & '$Python' -m pip install <path-to-$pkg>")
+    }
+    # @(...) so a single match stays a one-element array: indexing a bare string
+    # returns its first character, which printed the location as "E".
+    $editable = @($show.Text -split "`r?`n" |
+                  Where-Object { $_ -match "^Editable project location:" })
+    if ($editable.Count -gt 0) {
+        # ASCII only in these messages. A build run from a zh-TW console prints
+        # through cp950, where an em-dash arrives as "??" and turns the one
+        # explanation someone needs into noise.
+        Fail ("'$pkg' is installed EDITABLE in the build interpreter, so " +
+              "PyInstaller will`nomit it, and the build will look completely " +
+              "fine while missing it.`n`n  $Python`n  $($editable[0].Trim())`n`n" +
+              "PyInstaller's module graph is static and cannot follow a .pth " +
+              "editable`ninstall whose directory is not named after the package. " +
+              "--hidden-import,`n--collect-submodules and --paths do NOT help.`n`n" +
+              "Reinstall it normally before building:`n" +
+              "    & '$Python' -m pip uninstall -y $pkg`n" +
+              "    & '$Python' -m pip install <path-to-$pkg>")
+    }
+    Write-Host "OK    $pkg is installed non-editable"
 }
 
 # Generate icon
 Write-Host "Generating icon ($IconBg / $IconRing) ..."
-python "$PackScripts\make_icon.py" --out "static\gs-icon.ico" --bg $IconBg --ring $IconRing --size $IconSize
+& $Python "$PackScripts\make_icon.py" --out "static\gs-icon.ico" --bg $IconBg --ring $IconRing --size $IconSize
 if ($LASTEXITCODE -ne 0) { Write-Error "make_icon.py failed" }
 
 # Build --add-data flags — ONLY what the project's $PyiAddData lists.
@@ -55,9 +159,34 @@ $pyiArgs = @(
 Write-Host ""
 Write-Host "pyinstaller $($pyiArgs -join ' ')"
 Write-Host ""
-& pyinstaller @pyiArgs
+# `python -m PyInstaller`, not the `pyinstaller` shim: the module form cannot
+# resolve to a different interpreter than the one chosen above.
+& $Python -m PyInstaller @pyiArgs
 
-if ($LASTEXITCODE -ne 0) { Write-Error "pyinstaller failed (exit $LASTEXITCODE)" }
+if ($LASTEXITCODE -ne 0) { Fail "pyinstaller failed (exit $LASTEXITCODE)" }
 
 $dist = if ($OneFile) { "dist\$AppExe.exe" } else { "dist\$AppExe\" }
 Write-Host "Build done -> $dist"
+
+# ── Post-build gate ───────────────────────────────────────────────────────────
+# A check the project runs against the artefact it just produced. Bundling
+# problems are invisible in the dist directory — pure-Python modules are compiled
+# into the executable's PYZ archive, so "is the folder there?" answers nothing.
+# Only running the thing does.
+#
+# Declare in pack.config.ps1:
+#   $PostBuildCheck = "python C:\...\verify_packaged_licence.py {dist}"
+# {dist} is replaced with the path to the built executable.
+if ($PostBuildCheck) {
+    $exe = if ($OneFile) { "dist\$AppExe.exe" } else { "dist\$AppExe\$AppExe.exe" }
+    $cmd = $PostBuildCheck.Replace("{dist}", (Resolve-Path $exe).Path)
+    Write-Host ""
+    Write-Host "=== Post-build check ===" -ForegroundColor Cyan
+    Write-Host $cmd
+    & powershell -NoProfile -Command $cmd
+    if ($LASTEXITCODE -ne 0) {
+        Fail ("Post-build check FAILED (exit $LASTEXITCODE).`n`nThe build exists " +
+              "at $exe but did not pass its own gate.`nDO NOT SHIP IT.")
+    }
+    Write-Host "Post-build check passed." -ForegroundColor Green
+}
