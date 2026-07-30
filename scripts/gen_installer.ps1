@@ -122,13 +122,24 @@ $iss = $template `
     -replace '__APP_URL__',       $AppUrl `
     -replace '__GH_BLOCK__',      $ghBlock
 
-$iss | Set-Content -Path "installer.iss" -Encoding UTF8NoBOM
+# UTF-8 without a BOM, written through .NET rather than `-Encoding UTF8NoBOM`:
+# that value only exists in PowerShell 7, and Windows PowerShell 5.1 is what
+# `powershell.exe` resolves to — which is what most automation invokes.
+# ISCC also mis-parses a leading BOM in the first directive.
+[System.IO.File]::WriteAllText(
+    (Join-Path (Get-Location).Path "installer.iss"),
+    ($iss -join "`r`n"),
+    (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Generated installer.iss"
 
 # ── Compile with ISCC ─────────────────────────────────────────────────────
+# `(...)?.Source` would be tidier but is PowerShell 7 syntax, and a parse error
+# takes the whole script down before any of it runs — the installer step had
+# never worked under 5.1 for exactly that reason.
+$isccOnPath = Get-Command iscc -ErrorAction SilentlyContinue
 $iscc = $null
 foreach ($c in @(
-    (Get-Command iscc -ErrorAction SilentlyContinue)?.Source,
+    $(if ($isccOnPath) { $isccOnPath.Source } else { $null }),
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     "C:\Program Files\Inno Setup 6\ISCC.exe"
 )) {

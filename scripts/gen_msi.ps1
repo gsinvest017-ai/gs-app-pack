@@ -29,7 +29,10 @@ Run the build step first:
 }
 
 # ── Locate WiX v4 ─────────────────────────────────────────────────────────
-$wix = (Get-Command wix -ErrorAction SilentlyContinue)?.Source
+# Not `(...)?.Source`: PowerShell 7 syntax, and a parse error kills the script
+# before it runs at all under Windows PowerShell 5.1.
+$wixOnPath = Get-Command wix -ErrorAction SilentlyContinue
+$wix = if ($wixOnPath) { $wixOnPath.Source } else { $null }
 if (-not $wix) {
     Write-Error @"
 WiX v4 not found on PATH.
