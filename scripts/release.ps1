@@ -64,4 +64,7 @@ gh release create $Tag @assets `
     --notes $Notes
 
 Write-Host ""
-Write-Host "Release published: https://github.com/$AppUrl/releases/tag/$Tag" -ForegroundColor Green
+# $AppUrl is already absolute (pack.example.ps1 shows it as https://github.com/owner/repo),
+# so prefixing it again produced https://github.com/https://github.com/... — an
+# unclickable link printed as the final word on a successful release.
+Write-Host "Release published: $($AppUrl.TrimEnd('/'))/releases/tag/$Tag" -ForegroundColor Green
