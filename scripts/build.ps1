@@ -107,6 +107,41 @@ if ($probe.Code -ne 0) {
 # silently unprotected release, which is the case this check exists for.
 #
 # Declare in pack.config.ps1:  $RequireNonEditable = @("keyguard")
+#
+# Ahead of that, every editable install of the invisible kind is reported whether
+# it was declared or not. Not all editable installs are a problem: a plain `.pth`
+# holding a path is one PyInstaller reads and follows, so a standard `src/mypkg/`
+# layout bundles correctly. What it cannot follow is a `.pth` that installs a
+# MetaPathFinder at runtime, which is what setuptools emits when a package name is
+# mapped onto a differently-named directory. Those are listed below because each
+# one is silently unbundlable, and only the project knows which of them it needs.
+$probe = Invoke-Native $Python @("$PackScripts\probe_editables.py")
+$invisible = @{}
+if ($probe.Code -eq 0) {
+    try {
+        $parsed = $probe.Text | ConvertFrom-Json
+        foreach ($p in $parsed.finder_based.PSObject.Properties) {
+            $invisible[$p.Name] = $p.Value
+        }
+    } catch {
+        Write-Host "NOTE  could not probe editable installs; skipping that check" `
+                   -ForegroundColor DarkGray
+    }
+}
+if ($invisible.Count -gt 0) {
+    Write-Host ""
+    Write-Host "WARNING: these packages are installed editable in a form" -ForegroundColor Yellow
+    Write-Host "         PyInstaller CANNOT follow, and will be omitted from the" -ForegroundColor Yellow
+    Write-Host "         build with no error:" -ForegroundColor Yellow
+    foreach ($name in ($invisible.Keys | Sort-Object)) {
+        Write-Host ("           $name  <- " + $invisible[$name]) -ForegroundColor Yellow
+    }
+    Write-Host "         Harmless if this app does not import them. If it does," -ForegroundColor Yellow
+    Write-Host "         reinstall normally (no -e) and add the name to" -ForegroundColor Yellow
+    Write-Host "         `$RequireNonEditable so this fails instead of warning." -ForegroundColor Yellow
+    Write-Host ""
+}
+
 foreach ($pkg in $RequireNonEditable) {
     $show = Invoke-Native $Python @("-m", "pip", "show", $pkg)
     if ($show.Code -ne 0 -or $show.Text -notmatch "(?m)^Name:") {

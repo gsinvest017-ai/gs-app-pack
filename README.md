@@ -71,7 +71,22 @@ Two config knobs guard against a repeat:
 
 | Setting | What it does |
 |---------|--------------|
-| `$RequireNonEditable = @("pkg")` | Build fails if `pkg` is missing, or installed `-e`, in the build interpreter. PyInstaller's static module graph cannot follow a `.pth` editable install whose directory is not named after the package, so it is dropped without a warning. List packages whose absence is *quiet* rather than a crash. |
+| `$RequireNonEditable = @("pkg")` | Build fails if `pkg` is missing, or installed `-e`, in the build interpreter. List packages whose absence is *quiet* rather than a crash. |
+
+Every build also **reports editable installs PyInstaller cannot follow**, declared
+or not. Not all editable installs are a problem, and the difference is in the
+`.pth` file:
+
+| `.pth` contains | Example | PyInstaller |
+|-----------------|---------|-------------|
+| a bare path | `C:\proj\src` | **follows it** — standard `src/mypkg/` layout, the package is a real directory |
+| `import __editable___x_finder` | `package-dir = {mypkg = "src"}` | **cannot follow** — the name→directory mapping lives in a runtime `MetaPathFinder`, and the module graph is static |
+
+The second form is what silently dropped a licence module. `scripts/probe_editables.py`
+finds them by parsing the finder's `MAPPING` (without importing it) and the build
+lists each one as a warning — harmless if the app never imports them, fatal if it
+does, and only the project knows which. Put those in `$RequireNonEditable` to turn
+the warning into a failure.
 | `$PostBuildCheck = "cmd {dist}"` | Runs against the finished executable; non-zero exit fails the build. `{dist}` becomes the exe path. Bundling problems cannot be seen from outside — pure-Python modules are compiled into the exe's PYZ archive, so inspecting `dist\` proves nothing. Only running it does. |
 
 Example (`autogo`, which must ship with its licence gate intact):
@@ -108,7 +123,27 @@ def _start_server(host, port):
 
 ## Projects using gs-app-pack
 
-| Project | pack.config.ps1 |
-|---------|----------------|
-| gs-gh-summary | AppExe=gs-gh-summary, ServerMode=function |
-| autogo | AppExe=autogo, ServerMode=uvicorn |
+| Project | pack.config.ps1 | Build interpreter | Guards |
+|---------|----------------|-------------------|--------|
+| autogo | AppExe=autogo, ServerMode=uvicorn | `.venv` | `RequireNonEditable=keyguard`, `PostBuildCheck` |
+| gs-suite | AppExe=gs-suite | `.venv` | none needed — see below |
+| gs-gh-summary | AppExe=gs-gh-summary, ServerMode=function | **no venv** → system Python | none needed — see below |
+
+Audited 2026-07-30 after autogo shipped an unprotected build twice. What the two
+other projects import when a package goes missing:
+
+- **gs-gh-summary** — `webview` logs an error and exits 1, `slack_bolt` prints and
+  exits 2, optional `jira_sync` prints "jira sync idle". All loud. `yaml` falls
+  back to `None`, which is quieter, but PyYAML is an ordinary non-editable
+  dependency and bundles normally.
+- **gs-suite** — `webview` falls back to a browser with a log line; the Stripe
+  provider returns `False` when `stripe` is absent, i.e. fails *closed*.
+
+Neither has a control that grants something when its module vanishes, so neither
+needs `$RequireNonEditable`. Their editable installs (`gs-common`, `gs-suite`) use
+plain `.pth` files, which PyInstaller follows.
+
+**gs-gh-summary has no virtualenv**, so it builds with whatever Python is on PATH
+and inherits every package installed there. It works, and the build now says so —
+but giving it a `.venv` would make its builds reproducible and silence the
+editable-install warning it currently inherits from the system interpreter.
