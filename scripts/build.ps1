@@ -182,6 +182,25 @@ if ($LASTEXITCODE -ne 0) { Write-Error "make_icon.py failed" }
 $addDataArgs = @()
 foreach ($d in $PyiAddData) { $addDataArgs += "--add-data", $d }
 
+# ── Server module started by name ─────────────────────────────────────────────
+# `uvicorn.run("web.app:app", ...)` names its ASGI app in a string, and a string
+# is invisible to PyInstaller's static module graph. The build then succeeds, the
+# installer builds, the app installs, and it dies on first launch with
+# "Error loading ASGI app. Could not import module". Worse, $PyiAddData usually
+# bundles that package's templates, so `_internal\web\` exists and looks right
+# while containing no Python at all.
+#
+# Collecting the top-level package is the fix. Added automatically here rather
+# than left to each project, because nothing about the failure points at it.
+if ($ServerMode -eq "uvicorn" -and $ServerModule) {
+    $root = ($ServerModule -split "\.")[0]
+    $already = @($PyiExtraArgs) -match "collect-submodules=$root(\s|$)"
+    if (-not $already) {
+        Write-Host "Adding --collect-submodules=$root (uvicorn starts it by name)"
+        $PyiExtraArgs = @($PyiExtraArgs) + "--collect-submodules=$root"
+    }
+}
+
 $mode = if ($OneFile) { "--onefile" } else { "--onedir" }
 
 $pyiArgs = @(

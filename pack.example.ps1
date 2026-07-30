@@ -78,7 +78,18 @@ $RequireNonEditable = @()             # e.g. @("keyguard")
 # Worth having because bundling problems are invisible from the outside: pure
 # Python modules are compiled into the exe's PYZ archive, so inspecting the dist
 # directory proves nothing. Only running it does.
-$PostBuildCheck = ""                  # e.g. "python C:\...\verify_x.py {dist}"
+#
+# gs-app-pack ships one you almost certainly want:
+#
+#   $PostBuildCheck = "python <gs-app-pack>\scripts\smoke_launch.py {dist}"
+#
+# It starts the app on a free port and requires an HTTP response. A build can
+# succeed, install, and still die on launch when a module is named in a string —
+# `uvicorn.run("web.app:app")`, a plugin lookup, an entry point — because
+# PyInstaller's module graph is static. That shipped once as v0.1.6.
+#
+# Chain several with `;` and `if ($LASTEXITCODE)`, or point at your own script.
+$PostBuildCheck = ""                  # e.g. "python C:\...\smoke_launch.py {dist}"
 
 # ── Installer (Inno Setup) ────────────────────────────────────────────────
 $InstallerRequiresGh = $false         # auto-install GitHub CLI if missing

@@ -74,6 +74,13 @@ _SERVER_PORT = 8790
 #   def _start_server(host: str, port: int) -> None:
 #       uvicorn.run("web.app:app", host=host, port=port, log_level="warning")
 #
+#   NOTE: "web.app:app" is a string, so PyInstaller's static module graph never
+#   sees it. build.ps1 adds --collect-submodules for the top-level package of
+#   $ServerModule to compensate; if the app imports other local packages only
+#   through strings or plugin lookups, collect those too in $PyiExtraArgs.
+#   Getting this wrong builds and installs cleanly, then fails on first launch
+#   with "Error loading ASGI app. Could not import module".
+#
 # ════════════════════════════════════════════════════════════════════════════
 def _start_server(host: str, port: int) -> None:
     raise NotImplementedError("Fill in _start_server() in app.py")
