@@ -34,6 +34,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checkedonce
 
+[InstallDelete]
+; Clear the bundled payload before writing the new one. Inno overwrites files it
+; is installing but never removes ones the new build dropped, so a dependency
+; taken out of the build lingers on every upgraded machine: removing PaddleOCR
+; from autogo cut 1.2 GB from the installer, and upgraded installs still carried
+; all of it. Worse than the disk cost, _internal is on sys.path at runtime, so a
+; stale package can still be imported and picked over the one that replaced it.
+; User data is not here — it lives in %APPDATA% — so this is safe to wipe.
+Type: filesandordirs; Name: "{app}\_internal"
+__EXTRA_DELETE__
+
 [Files]
 Source: "dist\__APP_EXE__\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 

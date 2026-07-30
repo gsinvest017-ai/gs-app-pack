@@ -113,6 +113,18 @@ end;
 '@
 }
 
+# Paths the project wants gone before the new payload lands, on top of the
+# _internal clear that every project gets. For a repo that used to package a
+# different way, the leftovers are the whole previous layout — and one of them can
+# be a launcher that still works, still finds its old virtualenv, and runs the
+# unpackaged app with none of the guarantees the packaged one carries.
+$extraDelete = ""
+if ($InstallerDeleteExtra) {
+    $extraDelete = (($InstallerDeleteExtra | ForEach-Object {
+        "Type: filesandordirs; Name: `"{app}\$_`""
+    }) -join "`r`n")
+}
+
 $iss = $template `
     -replace '__APP_NAME__',      $AppName `
     -replace '__APP_VERSION__',   $AppVersion `
@@ -120,6 +132,7 @@ $iss = $template `
     -replace '__APP_EXE__',       $AppExe `
     -replace '__APP_PUBLISHER__', $AppPublisher `
     -replace '__APP_URL__',       $AppUrl `
+    -replace '__EXTRA_DELETE__',  $extraDelete `
     -replace '__GH_BLOCK__',      $ghBlock
 
 # UTF-8 without a BOM, written through .NET rather than `-Encoding UTF8NoBOM`:
