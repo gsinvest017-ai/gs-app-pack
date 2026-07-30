@@ -237,7 +237,20 @@ if ($PostBuildCheck) {
     Write-Host ""
     Write-Host "=== Post-build check ===" -ForegroundColor Cyan
     Write-Host $cmd
-    & powershell -NoProfile -Command $cmd
+
+    # Via a temp script, not `powershell -Command $cmd`: passing a command as a
+    # string re-parses it in the child, so a `|` inside a quoted regex became a
+    # pipeline and the check failed on its own arguments. A file has no such
+    # layer, and it also lets $PostBuildCheck be several lines.
+    $probeScript = Join-Path ([System.IO.Path]::GetTempPath()) `
+                             ("gs-app-pack-postbuild-$PID.ps1")
+    try {
+        [System.IO.File]::WriteAllText($probeScript, $cmd,
+                                       (New-Object System.Text.UTF8Encoding($false)))
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $probeScript
+    } finally {
+        Remove-Item $probeScript -ErrorAction SilentlyContinue
+    }
     if ($LASTEXITCODE -ne 0) {
         Fail ("Post-build check FAILED (exit $LASTEXITCODE).`n`nThe build exists " +
               "at $exe but did not pass its own gate.`nDO NOT SHIP IT.")
