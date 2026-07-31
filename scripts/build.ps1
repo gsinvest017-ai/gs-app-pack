@@ -234,10 +234,21 @@ Write-Host "Build done -> $dist"
 #
 # Declare in pack.config.ps1:
 #   $PostBuildCheck = "python C:\...\verify_packaged_licence.py {dist}"
-# {dist} is replaced with the path to the built executable.
+# {dist} is replaced with the path to the built executable, and {python} with
+# the interpreter the build itself used.
+#
+# Use {python}, not a bare `python`. A gate is only worth what its own
+# dependencies are: a bare `python` resolves through PATH, which is a different
+# interpreter from the one that built the exe and can hold a months-old copy of
+# the checker. A gate silently running an old version is worse than no gate,
+# because it still prints PASS. Seen for real -- a newly added check came back
+# as `unrecognized arguments`.
 if ($PostBuildCheck) {
     $exe = if ($OneFile) { "dist\$AppExe.exe" } else { "dist\$AppExe\$AppExe.exe" }
-    $cmd = $PostBuildCheck.Replace("{dist}", (Resolve-Path $exe).Path)
+    $cmd = $PostBuildCheck.Replace("{dist}", (Resolve-Path $exe).Path).
+                           # Call operator plus quotes: the resolved
+                           # interpreter can sit under "Program Files".
+                           Replace("{python}", "& `"$Python`"")
     Write-Host ""
     Write-Host "=== Post-build check ===" -ForegroundColor Cyan
     Write-Host $cmd
@@ -248,9 +259,21 @@ if ($PostBuildCheck) {
     # layer, and it also lets $PostBuildCheck be several lines.
     $probeScript = Join-Path ([System.IO.Path]::GetTempPath()) `
                              ("gs-app-pack-postbuild-$PID.ps1")
+    # Stop on the first error, and turn one into a non-zero exit. Without this a
+    # CommandNotFoundException inside the temp script left $LASTEXITCODE at 0 and
+    # the build printed "Post-build check passed" for a gate that never ran --
+    # the exact failure mode a gate exists to prevent.
+    $header = @'
+$ErrorActionPreference = 'Stop'
+trap { Write-Host $_.Exception.Message -ForegroundColor Red; exit 1 }
+'@
     try {
-        [System.IO.File]::WriteAllText($probeScript, $cmd,
-                                       (New-Object System.Text.UTF8Encoding($false)))
+        # WITH a BOM. `powershell -File` on 5.1 decodes a BOM-less file through
+        # the ANSI codepage, which mangles any non-ASCII path in the command --
+        # "系統檔案" arrived as "系統檔?" and the interpreter was not found.
+        # (installer.iss needs the opposite: ISCC mis-parses a leading BOM.)
+        [System.IO.File]::WriteAllText($probeScript, ($header + "`r`n" + $cmd),
+                                       (New-Object System.Text.UTF8Encoding($true)))
         & powershell -NoProfile -ExecutionPolicy Bypass -File $probeScript
     } finally {
         Remove-Item $probeScript -ErrorAction SilentlyContinue
