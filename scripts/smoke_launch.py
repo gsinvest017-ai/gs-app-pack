@@ -81,6 +81,9 @@ def main() -> int:
 
     port = args.port or free_port()
     env = dict(os.environ)
+    # A licence refusal shows a modal when the app has no console; an
+    # unattended smoke run would sit on it until the timeout.
+    env.setdefault("KEYGUARD_NO_DIALOG", "1")
     for pair in args.env:
         key, _, value = pair.partition("=")
         env[key] = value

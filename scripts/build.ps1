@@ -46,7 +46,11 @@ function Invoke-Native {
     }
 }
 
-. (Resolve-Path $Config)   # loads $AppExe, $PyiAddData, $PyiExtraArgs, etc.
+# UTF-8 regardless of host: dot-sourcing reads a BOM-less file as the ANSI
+# codepage under Windows PowerShell 5.1, which mangles any non-ASCII path in
+# the config. See Load-PackConfig.ps1.
+. "$PSScriptRoot\Load-PackConfig.ps1"
+Import-PackConfig $Config   # loads $AppExe, $PyiAddData, $PyiExtraArgs, etc.
 
 # Kill running instance (file-lock prevention)
 Get-Process -Name $AppExe -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue

@@ -17,7 +17,8 @@ $PackRoot    = Split-Path -Parent $PSScriptRoot
 $ProjectRoot = (Get-Location).Path
 $ErrorActionPreference = "Stop"
 
-. (Resolve-Path $Config)
+. "$PSScriptRoot\Load-PackConfig.ps1"
+Import-PackConfig $Config
 
 $SourceDir = Join-Path $ProjectRoot "dist" $AppExe
 if (-not (Test-Path $SourceDir)) {

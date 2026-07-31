@@ -12,7 +12,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Resolve-Path $Config)
+. "$PSScriptRoot\Load-PackConfig.ps1"
+Import-PackConfig $Config
 
 $setupExe   = "dist\$AppExe-setup.exe"
 $setupMsi   = "dist\$AppExe-setup.msi"
