@@ -267,12 +267,19 @@ if ($PostBuildCheck) {
 $ErrorActionPreference = 'Stop'
 trap { Write-Host $_.Exception.Message -ForegroundColor Red; exit 1 }
 '@
+    # And a check after the LAST command. A PowerShell script that ends normally
+    # exits 0 no matter what the final native command returned, so the closing
+    # step of every $PostBuildCheck was unenforced: a gate could print
+    # "unrecognized arguments", exit 2, and the build would still say
+    # "Post-build check passed". That shipped once.
+    $footer = "`r`n" + 'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'
     try {
         # WITH a BOM. `powershell -File` on 5.1 decodes a BOM-less file through
         # the ANSI codepage, which mangles any non-ASCII path in the command --
         # "系統檔案" arrived as "系統檔?" and the interpreter was not found.
         # (installer.iss needs the opposite: ISCC mis-parses a leading BOM.)
-        [System.IO.File]::WriteAllText($probeScript, ($header + "`r`n" + $cmd),
+        [System.IO.File]::WriteAllText($probeScript,
+                                       ($header + "`r`n" + $cmd + $footer),
                                        (New-Object System.Text.UTF8Encoding($true)))
         & powershell -NoProfile -ExecutionPolicy Bypass -File $probeScript
     } finally {
