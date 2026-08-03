@@ -174,6 +174,17 @@ def main() -> int:
         print("      last output:")
         for line in output.strip().splitlines()[-15:]:
             print(f"        {safe(line)}")
+    if re.search(r"licence (refused|expired|withdrawn)|Licence expired"
+                 r"|withdrawn by the supplier", output, re.I):
+        # Not a packaging fault, and pointing at --collect-submodules here
+        # sends the reader after one that is not there. Hit three times:
+        # the licence on the build machine had been deliberately expired.
+        print("")
+        print("      The licence gate refused this launch. The licence on "
+              "this machine has")
+        print("      expired or been withdrawn -- nothing is wrong with "
+              "the build.")
+        return 1
     print("\n      A frozen app that builds but will not start is usually a "
           "module\n      named in a string — an ASGI target, a plugin, an entry "
           "point — which\n      PyInstaller cannot see. Add "
