@@ -146,6 +146,67 @@ if ($invisible.Count -gt 0) {
     Write-Host ""
 }
 
+# ── Declarative licence gate ─────────────────────────────────────────────────
+# The two keyguard checks in this file only do anything when the project
+# declares $RequireNonEditable and $PostBuildCheck. A project that simply left
+# them out builds and ships with no gate at all -- and nothing here could tell
+# "forgot" from "deliberately unlocked", because both look identical: two
+# undeclared variables.
+#
+# That is not hypothetical. textbook-prover copied this template and dropped
+# exactly those two lines; every build since has passed. A 2026-08 audit also
+# found two applications with licences already issued against them whose repos
+# contained no gate at all, so nothing would ever verify those keys.
+#
+# So the declaration is mandatory and its absence is fatal:
+#     $Licensed = $true    -> both keyguard gates below must be present
+#     $Licensed = $false   -> deliberately unlocked; gates skipped, on the record
+#
+# ASCII only in these messages: a build run from a zh-TW console prints through
+# cp950, where non-ASCII arrives as "??" and the one explanation someone needs
+# turns into noise.
+$licensedVar = Get-Variable -Name Licensed -Scope 0 -ErrorAction SilentlyContinue
+if ($null -eq $licensedVar) {
+    Fail ("pack.config.ps1 does not declare `$Licensed.`n`n" +
+          "Every project must state whether it ships behind a licence gate, " +
+          "because`n'forgot to add the gate' and 'deliberately has no gate' " +
+          "are indistinguishable`nfrom here -- both are just missing variables." +
+          "`n`nAdd ONE of these to pack.config.ps1:`n`n" +
+          "  # This app ships behind a KEYGUARD licence gate.`n" +
+          "  `$Licensed = `$true`n" +
+          "  `$RequireNonEditable = @(`"keyguard`")`n" +
+          "  `$PostBuildCheck = `"{python} -m keyguard.packagecheck '{dist}' " +
+          "--email-env <APP_ID>_LICENCE_EMAIL --require-console-output --require-window`"`n`n" +
+          "  # -- or --`n`n" +
+          "  # This app is deliberately unlocked (internal tool, no licence).`n" +
+          "  `$Licensed = `$false")
+}
+
+if ([bool]$licensedVar.Value) {
+    if (@($RequireNonEditable) -notcontains "keyguard") {
+        Fail ("`$Licensed = `$true but `$RequireNonEditable does not contain " +
+              "'keyguard'.`n`nWithout it, a build whose interpreter has keyguard " +
+              "missing or installed`neditable produces an executable that runs " +
+              "fine and enforces nothing --`nthe scaffolded gate fails open by " +
+              "design.`n`nAdd to pack.config.ps1:`n" +
+              "    `$RequireNonEditable = @(`"keyguard`")")
+    }
+    if (-not $PostBuildCheck -or $PostBuildCheck -notmatch "keyguard\.packagecheck") {
+        Fail ("`$Licensed = `$true but `$PostBuildCheck does not run " +
+              "keyguard.packagecheck.`n`n`$RequireNonEditable only proves keyguard " +
+              "was installed correctly at build`ntime. packagecheck is what proves " +
+              "the finished executable actually`nenforces: that --licence-status " +
+              "reports enforced, that an unlicensed run`nis a bounded trial rather " +
+              "than an open door.`n`nAdd to pack.config.ps1:`n" +
+              "    `$PostBuildCheck = `"{python} -m keyguard.packagecheck '{dist}' " +
+              "--email-env <APP_ID>_LICENCE_EMAIL`"")
+    }
+    Write-Host "OK    licence gate declared (`$Licensed = `$true)"
+} else {
+    Write-Host "NOTE  `$Licensed = `$false - this app ships with no licence gate" `
+               -ForegroundColor DarkGray
+}
+
 foreach ($pkg in $RequireNonEditable) {
     $show = Invoke-Native $Python @("-m", "pip", "show", $pkg)
     if ($show.Code -ne 0 -or $show.Text -notmatch "(?m)^Name:") {
